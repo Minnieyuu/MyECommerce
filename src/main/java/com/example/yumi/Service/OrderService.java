@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import com.example.yumi.Dao.OrderDao;
 import com.example.yumi.Dao.ProductDao;
+import com.example.yumi.Enum.OrderStatus;
 import com.example.yumi.Enum.ProductStatus;
 import com.example.yumi.Enum.ResultCode;
 import com.example.yumi.Util.RequestFingerprint;
@@ -26,6 +27,8 @@ import com.example.yumi.entity.OrderItem;
 import com.example.yumi.entity.Product;
 
 import jakarta.transaction.Transactional;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 @Service
 public class OrderService {
@@ -35,6 +38,9 @@ public class OrderService {
 
 	@Autowired
 	ProductDao productDao;
+
+	@Autowired
+	MockPaymentService mockPaymentService;
 
 	/**
 	 * 檢查 1.重複下單 2.商品是否存在 3.檢查庫存 4.商品是否上架 最後 5.扣庫存、新增訂單(要同時完成，發生exception會rollback)
@@ -65,6 +71,13 @@ public class OrderService {
 
 		List<Long> ids = new ArrayList<>();
 		for (ProductInfo item : req.getProductInfo()) {
+
+			// 同一個商品只能出現一次
+			if (ids.contains(item.getProductId())) {
+				return new OrderResponse(ResultCode.DUPLICATE_PRODUCT.getCode(),
+						ResultCode.DUPLICATE_PRODUCT.getMessage());
+			}
+
 			ids.add(item.getProductId());
 		}
 
@@ -150,7 +163,7 @@ public class OrderService {
 		Optional<Order> order = orderDao.findWithItemsById(orderId);
 
 		// 查無訂單或非本人訂單 回傳空物件
-		if (order.get() == null || order.get().getUserId().equals(userId)) {
+		if (order.isEmpty() || !order.get().getUserId().equals(userId)) {
 
 			return new GetOrderDto();
 
@@ -158,6 +171,86 @@ public class OrderService {
 
 		return GetOrderDto.parse(order.get());
 
+	}
+
+	@Transactional
+	public OrderResponse pay(@NotBlank @Size(max = 64) String userId, String orderId) {
+
+		Optional<Order> order = orderDao.findByOrderIdForUpdate(orderId);
+
+		// 查無訂單或非本人訂單，回傳404
+		if (order.isEmpty() || !order.get().getUserId().equals(userId)) {
+
+			return new OrderResponse(ResultCode.ORDER_NOT_FOUND.getCode(),
+					ResultCode.ORDER_NOT_FOUND.getMessage());
+
+			// 訂單狀態除了CREATE之外，都不回傳409-訂單無法付款
+		} else if (order.get().getStatus() != OrderStatus.CREATED) {
+			return new OrderResponse(ResultCode.ORDER_NOT_PAYABLE.getCode(),
+					ResultCode.ORDER_NOT_PAYABLE.getMessage());
+		}
+
+		// 呼叫模擬金流
+		boolean isPaid = mockPaymentService.pay(orderId, order.get().getTotalAmount());
+
+		if (!isPaid) {
+			return new OrderResponse(ResultCode.PAYMENT_FAILED.getCode(),
+					ResultCode.PAYMENT_FAILED.getMessage());
+		}
+
+		// 變更付款狀態
+		order.get().setStatus(OrderStatus.PAID);
+
+		return new OrderResponse(ResultCode.PAYMENT_SUCCESS.getCode(),
+				ResultCode.PAYMENT_SUCCESS.getMessage());
+	}
+
+	@Transactional
+	public OrderResponse cancel(@NotBlank @Size(max = 64) String userId, String orderId) {
+
+		Optional<Order> order = orderDao.findByOrderIdForUpdate(orderId);
+
+		// 查無訂單或非本人訂單，回傳404
+		if (order.isEmpty() || !order.get().getUserId().equals(userId)) {
+
+			return new OrderResponse(ResultCode.ORDER_NOT_FOUND.getCode(),
+					ResultCode.ORDER_NOT_FOUND.getMessage());
+
+		}
+
+		// 已取消：直接回傳成功，不重複還庫存
+		if (order.get().getStatus() == OrderStatus.CANCELLED) {
+			return new OrderResponse(ResultCode.ORDER_CANCEL_SUCCESS.getCode(),
+					ResultCode.ORDER_CANCEL_SUCCESS.getMessage());
+		}
+
+		// 已付款：先退款，退款失敗就不取消
+		if (order.get().getStatus() == OrderStatus.PAID) {
+
+			boolean isRefund = mockPaymentService.refund(orderId, order.get().getTotalAmount());
+
+			if (!isRefund) {
+				return new OrderResponse(ResultCode.ORDER_CANCEL_FAIL.getCode(),
+						ResultCode.ORDER_CANCEL_FAIL.getMessage());
+			}
+		}
+
+		// 還庫存：先鎖住商品再加回去
+		List<Long> ids = new ArrayList<>();
+		for (OrderItem item : order.get().getItems()) {
+			ids.add(item.getProductId());
+		}
+		List<Product> products = productDao.findAllByIdForUpdate(ids);
+
+		for (OrderItem item : order.get().getItems()) {
+			Product product = findProduct(products, item.getProductId());
+			product.setStock(product.getStock() + item.getQuantity());
+		}
+
+		order.get().setStatus(OrderStatus.CANCELLED);
+
+		return new OrderResponse(ResultCode.ORDER_CANCEL_SUCCESS.getCode(),
+				ResultCode.ORDER_CANCEL_SUCCESS.getMessage());
 	}
 
 }

@@ -7,7 +7,6 @@ import com.example.yumi.Enum.ProductStatus;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
-import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
 /** PATCH 欄位為 null 代表不更新。 */

@@ -57,4 +57,38 @@ public class OrderController {
 		return orderService.getOrder(userId, orderId);
 	}
 
+	/**
+	 * 付款
+	 */
+	@PostMapping("pay/{orderId}")
+	public ResponseEntity<OrderResponse> pay(
+			@RequestHeader @NotBlank @Size(max = 64) String userId,
+			@PathVariable String orderId) {
+
+		OrderResponse response = orderService.pay(userId, orderId);
+
+		int httpStatus = Integer.parseInt(response.getCode());
+
+		return ResponseEntity.status(httpStatus).body(response);
+	}
+
+	/**
+	 * 取消訂單
+	 * 
+	 * @param userId
+	 * @param orderId
+	 * @return
+	 */
+	@PostMapping("cancel/{orderId}")
+	public ResponseEntity<OrderResponse> cancel(
+			@RequestHeader @NotBlank @Size(max = 64) String userId,
+			@PathVariable String orderId) {
+
+		OrderResponse response = orderService.cancel(userId, orderId);
+
+		int httpStatus = Integer.parseInt(response.getCode());
+
+		return ResponseEntity.status(httpStatus).body(response);
+	}
+
 }
