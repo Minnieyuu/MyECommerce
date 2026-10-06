@@ -42,4 +42,11 @@ public class Product {
 	@Column(nullable = false, length = 20)
 	private ProductStatus status;
 
+	public Product(String name, BigDecimal price, int stock, ProductStatus status) {
+		this.name = name;
+		this.price = price;
+		this.stock = stock;
+		this.status = status;
+	}
+
 }
