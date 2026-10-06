@@ -36,7 +36,7 @@ public class Order {
 	@Column(name = "user_id", nullable = false, length = 64)
 	private String userId;
 
-	@Column(name = "order_id", nullable = false, length = 64)
+	@Column(name = "order_id", unique = true, nullable = true, length = 64)
 	private String orderId;
 
 	@Enumerated(EnumType.STRING)
@@ -50,10 +50,11 @@ public class Order {
 	@Column(name = "create_date", nullable = false)
 	private Instant createdAt;
 
-	// 用於驗證重複下單
+	// 用於驗證重複下單--key
 	@Column(name = "idempotency_key", nullable = false, length = 36)
 	private UUID idempotencyKey;
 
+	// 用於驗證重複下單--request body
 	@Column(name = "request_hash", nullable = false, length = 64)
 	private String requestHash;
 

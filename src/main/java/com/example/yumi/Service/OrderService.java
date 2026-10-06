@@ -2,6 +2,8 @@ package com.example.yumi.Service;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -16,6 +18,7 @@ import com.example.yumi.Enum.ProductStatus;
 import com.example.yumi.Enum.ResultCode;
 import com.example.yumi.Util.RequestFingerprint;
 import com.example.yumi.dto.CreateOrderRequest;
+import com.example.yumi.dto.GetOrderDto;
 import com.example.yumi.dto.OrderResponse;
 import com.example.yumi.dto.ProductInfo;
 import com.example.yumi.entity.Order;
@@ -93,7 +96,6 @@ public class OrderService {
 		// 4. 全部檢查通過，開始扣庫存、建立訂單
 		Order order = new Order();
 		order.setUserId(req.getUserId());
-		order.setOrderId(UUID.randomUUID().toString());
 		order.setIdempotencyKey(key);
 		order.setRequestHash(hash);
 		order.setCreatedAt(Instant.now());
@@ -125,7 +127,11 @@ public class OrderService {
 		productDao.saveAll(products);
 		orderDao.save(order);
 
-		return new OrderResponse(ResultCode.SUCCESS.getCode(), ResultCode.SUCCESS.getMessage());
+		// 產生訂單編號
+		String date = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE); // 20261006
+		order.setOrderId("OD" + date + String.format("%06d", order.getId()));
+
+		return new OrderResponse(ResultCode.SUCCESS.getCode(), order.getOrderId());
 	}
 
 	private Product findProduct(List<Product> products, Long productId) {
@@ -137,4 +143,21 @@ public class OrderService {
 		}
 		return null;
 	}
+
+	@Transactional
+	public GetOrderDto getOrder(String userId, String orderId) {
+
+		Optional<Order> order = orderDao.findWithItemsById(orderId);
+
+		// 查無訂單或非本人訂單 回傳空物件
+		if (order.get() == null || order.get().getUserId().equals(userId)) {
+
+			return new GetOrderDto();
+
+		}
+
+		return GetOrderDto.parse(order.get());
+
+	}
+
 }
