@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.example.yumi.Enum.ResultCode;
 import com.example.yumi.Service.OrderService;
 import com.example.yumi.dto.CreateOrderRequest;
 import com.example.yumi.dto.GetOrderDto;
@@ -37,7 +38,7 @@ public class OrderController {
 
 		OrderResponse response = orderService.create(idempotencyKey, request);
 
-		int httpStatus = Integer.parseInt(response.getCode());
+		int httpStatus = ResultCode.valueOf(response.getCode()).getHttpStatus();
 
 		return ResponseEntity.status(httpStatus).body(response);
 	}
@@ -60,14 +61,14 @@ public class OrderController {
 	/**
 	 * 付款
 	 */
-	@PostMapping("pay/{orderId}")
+	@PostMapping("/{orderId}/pay")
 	public ResponseEntity<OrderResponse> pay(
 			@RequestHeader @NotBlank @Size(max = 64) String userId,
 			@PathVariable String orderId) {
 
 		OrderResponse response = orderService.pay(userId, orderId);
 
-		int httpStatus = Integer.parseInt(response.getCode());
+		int httpStatus = ResultCode.valueOf(response.getCode()).getHttpStatus();
 
 		return ResponseEntity.status(httpStatus).body(response);
 	}
@@ -79,14 +80,14 @@ public class OrderController {
 	 * @param orderId
 	 * @return
 	 */
-	@PostMapping("cancel/{orderId}")
+	@PostMapping("/{orderId}/cancel")
 	public ResponseEntity<OrderResponse> cancel(
 			@RequestHeader @NotBlank @Size(max = 64) String userId,
 			@PathVariable String orderId) {
 
 		OrderResponse response = orderService.cancel(userId, orderId);
 
-		int httpStatus = Integer.parseInt(response.getCode());
+		int httpStatus = ResultCode.valueOf(response.getCode()).getHttpStatus();
 
 		return ResponseEntity.status(httpStatus).body(response);
 	}

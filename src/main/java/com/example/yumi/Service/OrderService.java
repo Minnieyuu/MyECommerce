@@ -60,12 +60,12 @@ public class OrderService {
 
 			// 相同 key + 不同 body → 422
 			if (!order.getRequestHash().equals(hash)) {
-				return new OrderResponse(ResultCode.IDEMPOTENCY_CONFLICT.getCode(),
+				return new OrderResponse(ResultCode.IDEMPOTENCY_CONFLICT.name(),
 						ResultCode.IDEMPOTENCY_CONFLICT.getMessage());
 			}
 
 			// 相同 key + 相同 body → 回傳同一筆 orderId
-			return new OrderResponse(ResultCode.SUCCESS.getCode(),
+			return new OrderResponse(ResultCode.SUCCESS.name(),
 					order.getOrderId());
 		}
 
@@ -74,7 +74,7 @@ public class OrderService {
 
 			// 同一個商品只能出現一次
 			if (ids.contains(item.getProductId())) {
-				return new OrderResponse(ResultCode.DUPLICATE_PRODUCT.getCode(),
+				return new OrderResponse(ResultCode.DUPLICATE_PRODUCT.name(),
 						ResultCode.DUPLICATE_PRODUCT.getMessage());
 			}
 
@@ -90,18 +90,18 @@ public class OrderService {
 
 			// 檢查商品是否存在
 			if (product == null) {
-				return new OrderResponse(ResultCode.PRODUCT_NOT_FOUND.getCode(),
+				return new OrderResponse(ResultCode.PRODUCT_NOT_FOUND.name(),
 						ResultCode.PRODUCT_NOT_FOUND.getMessage());
 			}
 			// 檢查庫存
 			if (product.getStock() < item.getCount()) {
-				return new OrderResponse(ResultCode.INSUFFICIENT_STOCK.getCode(),
+				return new OrderResponse(ResultCode.INSUFFICIENT_STOCK.name(),
 						ResultCode.INSUFFICIENT_STOCK.getMessage());
 			}
 
 			// 檢查商品是否上架
 			if (product.getStatus() != ProductStatus.ON_SALE) {
-				return new OrderResponse(ResultCode.PRODUCT_OFF_SALE.getCode(),
+				return new OrderResponse(ResultCode.PRODUCT_OFF_SALE.name(),
 						ResultCode.PRODUCT_OFF_SALE.getMessage());
 			}
 		}
@@ -144,7 +144,7 @@ public class OrderService {
 		String date = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE); // 20261006
 		order.setOrderId("OD" + date + String.format("%06d", order.getId()));
 
-		return new OrderResponse(ResultCode.SUCCESS.getCode(), order.getOrderId());
+		return new OrderResponse(ResultCode.SUCCESS.name(), order.getOrderId());
 	}
 
 	private Product findProduct(List<Product> products, Long productId) {
@@ -181,12 +181,12 @@ public class OrderService {
 		// 查無訂單或非本人訂單，回傳404
 		if (order.isEmpty() || !order.get().getUserId().equals(userId)) {
 
-			return new OrderResponse(ResultCode.ORDER_NOT_FOUND.getCode(),
+			return new OrderResponse(ResultCode.ORDER_NOT_FOUND.name(),
 					ResultCode.ORDER_NOT_FOUND.getMessage());
 
 			// 訂單狀態除了CREATE之外，都不回傳409-訂單無法付款
 		} else if (order.get().getStatus() != OrderStatus.CREATED) {
-			return new OrderResponse(ResultCode.ORDER_NOT_PAYABLE.getCode(),
+			return new OrderResponse(ResultCode.ORDER_NOT_PAYABLE.name(),
 					ResultCode.ORDER_NOT_PAYABLE.getMessage());
 		}
 
@@ -194,14 +194,14 @@ public class OrderService {
 		boolean isPaid = mockPaymentService.pay(orderId, order.get().getTotalAmount());
 
 		if (!isPaid) {
-			return new OrderResponse(ResultCode.PAYMENT_FAILED.getCode(),
+			return new OrderResponse(ResultCode.PAYMENT_FAILED.name(),
 					ResultCode.PAYMENT_FAILED.getMessage());
 		}
 
 		// 變更付款狀態
 		order.get().setStatus(OrderStatus.PAID);
 
-		return new OrderResponse(ResultCode.PAYMENT_SUCCESS.getCode(),
+		return new OrderResponse(ResultCode.PAYMENT_SUCCESS.name(),
 				ResultCode.PAYMENT_SUCCESS.getMessage());
 	}
 
@@ -213,14 +213,14 @@ public class OrderService {
 		// 查無訂單或非本人訂單，回傳404
 		if (order.isEmpty() || !order.get().getUserId().equals(userId)) {
 
-			return new OrderResponse(ResultCode.ORDER_NOT_FOUND.getCode(),
+			return new OrderResponse(ResultCode.ORDER_NOT_FOUND.name(),
 					ResultCode.ORDER_NOT_FOUND.getMessage());
 
 		}
 
 		// 已取消：直接回傳成功，不重複還庫存
 		if (order.get().getStatus() == OrderStatus.CANCELLED) {
-			return new OrderResponse(ResultCode.ORDER_CANCEL_SUCCESS.getCode(),
+			return new OrderResponse(ResultCode.ORDER_CANCEL_SUCCESS.name(),
 					ResultCode.ORDER_CANCEL_SUCCESS.getMessage());
 		}
 
@@ -230,7 +230,7 @@ public class OrderService {
 			boolean isRefund = mockPaymentService.refund(orderId, order.get().getTotalAmount());
 
 			if (!isRefund) {
-				return new OrderResponse(ResultCode.ORDER_CANCEL_FAIL.getCode(),
+				return new OrderResponse(ResultCode.ORDER_CANCEL_FAIL.name(),
 						ResultCode.ORDER_CANCEL_FAIL.getMessage());
 			}
 		}
@@ -249,7 +249,7 @@ public class OrderService {
 
 		order.get().setStatus(OrderStatus.CANCELLED);
 
-		return new OrderResponse(ResultCode.ORDER_CANCEL_SUCCESS.getCode(),
+		return new OrderResponse(ResultCode.ORDER_CANCEL_SUCCESS.name(),
 				ResultCode.ORDER_CANCEL_SUCCESS.getMessage());
 	}
 
