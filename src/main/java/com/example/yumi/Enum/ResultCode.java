@@ -16,6 +16,11 @@ public enum ResultCode {
 	ORDER_CANCEL_SUCCESS(200, "訂單取消成功"),
 	ORDER_CANCEL_FAIL(400, "訂單取消失敗"),
 	INSUFFICIENT_STOCK(400, "庫存不足"),
+	INVALID_REQUEST(400, "請求參數錯誤"),
+	MISSING_HEADER(400, "缺少必要的 header"),
+	API_NOT_FOUND(404, "API 不存在"),
+	METHOD_NOT_ALLOWED(405, "不支援的 HTTP 方法"),
+	INTERNAL_ERROR(500, "系統錯誤，請稍後再試"),
 	IDEMPOTENCY_CONFLICT(422, "Unprocessable Entity");
 
 	private int httpStatus;
@@ -26,7 +31,4 @@ public enum ResultCode {
 		this.message = message;
 	}
 
-
-
 }
-
