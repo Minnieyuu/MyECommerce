@@ -1,4 +1,4 @@
-package com.example.yumi.Controller;
+package com.example.yumi.Controller.Api;
 
 import java.util.UUID;
 

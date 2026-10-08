@@ -23,22 +23,30 @@ import com.example.yumi.Enum.OrderStatus;
 import com.example.yumi.Enum.ProductStatus;
 import com.example.yumi.Enum.ResultCode;
 import com.example.yumi.Service.OrderService;
+import com.example.yumi.Service.ProductService;
 import com.example.yumi.dto.CreateOrderRequest;
+import com.example.yumi.dto.GetOrderDto;
 import com.example.yumi.dto.OrderResponse;
 import com.example.yumi.dto.ProductInfo;
+import com.example.yumi.dto.ProductResponse;
+import com.example.yumi.dto.UpdateProductRequest;
 import com.example.yumi.entity.Order;
 import com.example.yumi.entity.Product;
 
 @SpringBootTest
 public class OrderServiceTest {
+
 	@Autowired
 	OrderService orderService;
 
 	@Autowired
-	ProductDao productDao;
+	OrderDao orderDao;
 
 	@Autowired
-	OrderDao orderDao;
+	ProductService productService;
+
+	@Autowired
+	ProductDao productDao;
 
 	@AfterEach
 	void cleanUp() {
@@ -220,6 +228,141 @@ public class OrderServiceTest {
 
 		// Then：剛好 10 張訂單
 		assertEquals(10, orderDao.count());
+	}
+
+	@Test
+	void 取消訂單_庫存加回且狀態變已取消() {
+		// Given：庫存 10，買 3 個後剩 7
+		Product product = productDao.save(
+				new Product("iPhone 20", new BigDecimal("50000"), 10, ProductStatus.ON_SALE));
+		OrderResponse created = orderService.create(UUID.randomUUID(), order(item(product.getId(), 3)));
+		String orderId = created.getMessage(); // 目前 orderId 放在 message 裡
+
+		// When：取消訂單
+		OrderResponse response = orderService.cancel("user1", orderId);
+
+		// Then：取消成功
+		assertEquals(ResultCode.ORDER_CANCEL_SUCCESS.name(), response.getCode());
+
+		// Then：庫存加回 10
+		assertEquals(10, productDao.findById(product.getId()).get().getStock());
+
+		// Then：訂單狀態變成已取消
+		assertEquals(OrderStatus.CANCELLED, orderDao.findWithItemsById(orderId).get().getStatus());
+	}
+
+	@Test
+	void 正常取消_重複取消_庫存不會重複加回() {
+
+		Integer stock = 10;
+
+		String userId = "user1";
+
+		// 新增商品
+		Product product = productDao.save(
+				new Product("iPhone 20", new BigDecimal("50000"), stock, ProductStatus.ON_SALE));
+
+		// 新增訂單
+		OrderResponse created = orderService.create(UUID.randomUUID(), order(item(product.getId(), 3)));
+
+		// 取得訂單編號
+		String orderId = created.getMessage();
+
+		// 第一次取消
+		OrderResponse first = orderService.cancel(userId, orderId);
+
+		// 第一次取消，查詢訂單
+		GetOrderDto orderFirst = orderService.getOrder(userId, orderId);
+
+		// 第一次取消，檢查訂單狀態
+		assertEquals(OrderStatus.CANCELLED, orderFirst.getStatus());
+
+		// Then：第一次也回傳成功
+		assertEquals(ResultCode.ORDER_CANCEL_SUCCESS.name(), first.getCode());
+
+		// 檢查第一次取消後，庫存是否正確
+		assertEquals(stock, productDao.findById(product.getId()).get().getStock());
+
+		// 第二次取消
+		OrderResponse second = orderService.cancel(userId, orderId);
+
+		// 第二次取消，查詢訂單
+		GetOrderDto orderSecond = orderService.getOrder(userId, orderId);
+
+		// 第二次取消，檢查訂單狀態
+		assertEquals(OrderStatus.CANCELLED, orderSecond.getStatus());
+
+		// Then：第二次也回傳成功
+		assertEquals(ResultCode.ORDER_CANCEL_SUCCESS.name(), second.getCode());
+
+		// 檢查第二次取消後，庫存是否正確
+		assertEquals(stock, productDao.findById(product.getId()).get().getStock());
+	}
+
+	@Test
+	void 同時下單與補貨_庫存數字正確() throws Exception {
+
+		// Given：庫存 10
+		Product product = productDao.save(
+				new Product("iPhone 20", new BigDecimal("50000"), 10, ProductStatus.ON_SALE));
+
+		ExecutorService pool = Executors.newFixedThreadPool(11); // 10 個買家 + 1 個管理員
+
+		CountDownLatch startGun = new CountDownLatch(1);
+
+		// 10 個買家：各買 1 個
+		List<Future<OrderResponse>> buyers = new ArrayList<>();
+
+		for (int i = 0; i < 10; i++) {
+			Callable<OrderResponse> buyTask = new Callable<OrderResponse>() {
+				@Override
+				public OrderResponse call() throws Exception {
+					startGun.await();
+					return orderService.create(UUID.randomUUID(), order(item(product.getId(), 1)));
+				}
+			};
+			buyers.add(pool.submit(buyTask));
+		}
+
+		// 1 個管理員：補貨 +5，同時改名稱
+		Callable<ProductResponse> restockTask = new Callable<ProductResponse>() {
+			@Override
+			public ProductResponse call() throws Exception {
+				startGun.await();
+				return productService.update(product.getId(),
+						new UpdateProductRequest("iPhone 20 新版", null, 5, null));
+			}
+		};
+		Future<ProductResponse> admin = pool.submit(restockTask);
+
+		startGun.countDown(); // 開放所有執行緒
+
+		// 等待所有任務完成，計算成功人數
+		int successCount = 0;
+
+		for (Future<OrderResponse> f : buyers) {
+
+			if (ResultCode.SUCCESS.name().equals(f.get().getCode())) {
+				successCount++;
+			}
+		}
+
+		// 用於確保賣家成功捕貨
+		admin.get();
+
+		// 執行緒關閉
+		pool.shutdown();
+
+		// Then：10 個人都買到
+		assertEquals(10, successCount);
+
+		Product after = productDao.findById(product.getId()).get();
+
+		// Then:檢查庫存數量是否正確
+		assertEquals(5, after.getStock());
+
+		// 檢查商品名稱是否成功修改
+		assertEquals("iPhone 20 新版", after.getName());
 	}
 
 	// 小工具：一個商品項目

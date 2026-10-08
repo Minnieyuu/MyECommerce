@@ -1,4 +1,4 @@
-package com.example.yumi.Controller;
+package com.example.yumi.Controller.Api;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
