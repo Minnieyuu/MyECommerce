@@ -17,6 +17,7 @@ import com.example.yumi.Dao.ProductDao;
 import com.example.yumi.Enum.OrderStatus;
 import com.example.yumi.Enum.ProductStatus;
 import com.example.yumi.Enum.ResultCode;
+import com.example.yumi.Exceptions.BusinessException;
 import com.example.yumi.Util.RequestFingerprint;
 import com.example.yumi.dto.CreateOrderRequest;
 import com.example.yumi.dto.GetOrderDto;
@@ -60,13 +61,11 @@ public class OrderService {
 
 			// 相同 key + 不同 body → 422
 			if (!order.getRequestHash().equals(hash)) {
-				return new OrderResponse(ResultCode.IDEMPOTENCY_CONFLICT.name(),
-						ResultCode.IDEMPOTENCY_CONFLICT.getMessage());
+				throw new BusinessException(ResultCode.IDEMPOTENCY_CONFLICT);
 			}
 
 			// 相同 key + 相同 body → 回傳同一筆 orderId
-			return new OrderResponse(ResultCode.SUCCESS.name(),
-					order.getOrderId());
+			return new OrderResponse(order.getOrderId());
 		}
 
 		List<Long> ids = new ArrayList<>();
@@ -74,8 +73,7 @@ public class OrderService {
 
 			// 同一個商品只能出現一次
 			if (ids.contains(item.getProductId())) {
-				return new OrderResponse(ResultCode.DUPLICATE_PRODUCT.name(),
-						ResultCode.DUPLICATE_PRODUCT.getMessage());
+				throw new BusinessException(ResultCode.DUPLICATE_PRODUCT);
 			}
 
 			ids.add(item.getProductId());
@@ -90,19 +88,16 @@ public class OrderService {
 
 			// 檢查商品是否存在
 			if (product == null) {
-				return new OrderResponse(ResultCode.PRODUCT_NOT_FOUND.name(),
-						ResultCode.PRODUCT_NOT_FOUND.getMessage());
+				throw new BusinessException(ResultCode.PRODUCT_NOT_FOUND);
 			}
 			// 檢查庫存
 			if (product.getStock() < item.getCount()) {
-				return new OrderResponse(ResultCode.INSUFFICIENT_STOCK.name(),
-						ResultCode.INSUFFICIENT_STOCK.getMessage());
+				throw new BusinessException(ResultCode.INSUFFICIENT_STOCK);
 			}
 
 			// 檢查商品是否上架
 			if (product.getStatus() != ProductStatus.ON_SALE) {
-				return new OrderResponse(ResultCode.PRODUCT_OFF_SALE.name(),
-						ResultCode.PRODUCT_OFF_SALE.getMessage());
+				throw new BusinessException(ResultCode.PRODUCT_OFF_SALE);
 			}
 		}
 
@@ -144,7 +139,7 @@ public class OrderService {
 		String date = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE); // 20261006
 		order.setOrderId("OD" + date + String.format("%06d", order.getId()));
 
-		return new OrderResponse(ResultCode.SUCCESS.name(), order.getOrderId());
+		return new OrderResponse(order.getOrderId());
 	}
 
 	private Product findProduct(List<Product> products, Long productId) {
@@ -162,11 +157,9 @@ public class OrderService {
 
 		Optional<Order> order = orderDao.findWithItemsById(orderId);
 
-		// 查無訂單或非本人訂單 回傳空物件
+		// 查無訂單或非本人訂單，回傳404
 		if (order.isEmpty() || !order.get().getUserId().equals(userId)) {
-
-			return new GetOrderDto();
-
+			throw new BusinessException(ResultCode.ORDER_NOT_FOUND);
 		}
 
 		return GetOrderDto.parse(order.get());
@@ -180,29 +173,25 @@ public class OrderService {
 
 		// 查無訂單或非本人訂單，回傳404
 		if (order.isEmpty() || !order.get().getUserId().equals(userId)) {
+			throw new BusinessException(ResultCode.ORDER_NOT_FOUND);
+		}
 
-			return new OrderResponse(ResultCode.ORDER_NOT_FOUND.name(),
-					ResultCode.ORDER_NOT_FOUND.getMessage());
-
-			// 訂單狀態除了CREATE之外，都不回傳409-訂單無法付款
-		} else if (order.get().getStatus() != OrderStatus.CREATED) {
-			return new OrderResponse(ResultCode.ORDER_NOT_PAYABLE.name(),
-					ResultCode.ORDER_NOT_PAYABLE.getMessage());
+		// 訂單狀態除了CREATED之外，都回傳409-訂單無法付款
+		if (order.get().getStatus() != OrderStatus.CREATED) {
+			throw new BusinessException(ResultCode.ORDER_NOT_PAYABLE);
 		}
 
 		// 呼叫模擬金流
 		boolean isPaid = mockPaymentService.pay(orderId, order.get().getTotalAmount());
 
 		if (!isPaid) {
-			return new OrderResponse(ResultCode.PAYMENT_FAILED.name(),
-					ResultCode.PAYMENT_FAILED.getMessage());
+			throw new BusinessException(ResultCode.PAYMENT_FAILED);
 		}
 
 		// 變更付款狀態
 		order.get().setStatus(OrderStatus.PAID);
 
-		return new OrderResponse(ResultCode.PAYMENT_SUCCESS.name(),
-				ResultCode.PAYMENT_SUCCESS.getMessage());
+		return new OrderResponse(orderId);
 	}
 
 	@Transactional
@@ -212,16 +201,12 @@ public class OrderService {
 
 		// 查無訂單或非本人訂單，回傳404
 		if (order.isEmpty() || !order.get().getUserId().equals(userId)) {
-
-			return new OrderResponse(ResultCode.ORDER_NOT_FOUND.name(),
-					ResultCode.ORDER_NOT_FOUND.getMessage());
-
+			throw new BusinessException(ResultCode.ORDER_NOT_FOUND);
 		}
 
 		// 已取消：直接回傳成功，不重複還庫存
 		if (order.get().getStatus() == OrderStatus.CANCELLED) {
-			return new OrderResponse(ResultCode.ORDER_CANCEL_SUCCESS.name(),
-					ResultCode.ORDER_CANCEL_SUCCESS.getMessage());
+			return new OrderResponse(orderId);
 		}
 
 		// 已付款：先退款，退款失敗就不取消
@@ -230,8 +215,7 @@ public class OrderService {
 			boolean isRefund = mockPaymentService.refund(orderId, order.get().getTotalAmount());
 
 			if (!isRefund) {
-				return new OrderResponse(ResultCode.ORDER_CANCEL_FAIL.name(),
-						ResultCode.ORDER_CANCEL_FAIL.getMessage());
+				throw new BusinessException(ResultCode.ORDER_CANCEL_FAIL);
 			}
 		}
 
@@ -249,8 +233,7 @@ public class OrderService {
 
 		order.get().setStatus(OrderStatus.CANCELLED);
 
-		return new OrderResponse(ResultCode.ORDER_CANCEL_SUCCESS.name(),
-				ResultCode.ORDER_CANCEL_SUCCESS.getMessage());
+		return new OrderResponse(orderId);
 	}
 
 }

@@ -1,6 +1,8 @@
 package com.example.yumi;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -8,6 +10,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -22,6 +25,7 @@ import com.example.yumi.Dao.ProductDao;
 import com.example.yumi.Enum.OrderStatus;
 import com.example.yumi.Enum.ProductStatus;
 import com.example.yumi.Enum.ResultCode;
+import com.example.yumi.Exceptions.BusinessException;
 import com.example.yumi.Service.OrderService;
 import com.example.yumi.Service.ProductService;
 import com.example.yumi.dto.CreateOrderRequest;
@@ -67,16 +71,12 @@ public class OrderServiceTest {
 		OrderResponse response = orderService.create(UUID.randomUUID(),
 				order(item(iphone.getId(), 2), item(airpods.getId(), 3)));
 
-		// Then：下單成功
-		assertEquals(ResultCode.SUCCESS.name(), response.getCode());
-
 		// Then：兩個商品都有扣庫存
 		assertEquals(98, productDao.findById(iphone.getId()).get().getStock());
 		assertEquals(47, productDao.findById(airpods.getId()).get().getStock());
 
 		// Then：訂單有 2 筆明細，金額 50000×2 + 8000×3 = 124000
-		String orderId = response.getMessage(); // 目前 orderId 放在 message 裡
-		Order order = orderDao.findWithItemsById(orderId).get();
+		Order order = orderDao.findWithItemsById(response.getOrderId()).get();
 		assertEquals(2, order.getItems().size());
 		assertEquals(0, new BigDecimal("124000").compareTo(order.getTotalAmount()));
 		assertEquals(OrderStatus.CREATED, order.getStatus());
@@ -92,11 +92,12 @@ public class OrderServiceTest {
 				new Product("庫存不足", new BigDecimal("8000"), 1, ProductStatus.ON_SALE));
 
 		// When：
-		OrderResponse response = orderService.create(UUID.randomUUID(),
-				order(item(enough.getId(), 2), item(notEnough.getId(), 3)));
+		BusinessException e = assertThrows(BusinessException.class,
+				() -> orderService.create(UUID.randomUUID(),
+						order(item(enough.getId(), 2), item(notEnough.getId(), 3))));
 
 		// Then：回傳庫存不足
-		assertEquals(ResultCode.INSUFFICIENT_STOCK.name(), response.getCode());
+		assertEquals(ResultCode.INSUFFICIENT_STOCK, e.getResultCode());
 
 		// Then：兩個商品的庫存都沒變，包括庫存充足的
 		assertEquals(100, productDao.findById(enough.getId()).get().getStock());
@@ -106,11 +107,11 @@ public class OrderServiceTest {
 	@Test
 	void 商品不存在_回傳錯誤() {
 		// When：買一個不存在的商品
-		OrderResponse response = orderService.create(UUID.randomUUID(),
-				order(item(999999L, 1)));
+		BusinessException e = assertThrows(BusinessException.class,
+				() -> orderService.create(UUID.randomUUID(), order(item(999999L, 1))));
 
 		// Then
-		assertEquals(ResultCode.PRODUCT_NOT_FOUND.name(), response.getCode());
+		assertEquals(ResultCode.PRODUCT_NOT_FOUND, e.getResultCode());
 	}
 
 	@Test
@@ -120,11 +121,11 @@ public class OrderServiceTest {
 				new Product("舊款手機", new BigDecimal("10000"), 10, ProductStatus.OFF_SALE));
 
 		// When
-		OrderResponse response = orderService.create(UUID.randomUUID(),
-				order(item(product.getId(), 1)));
+		BusinessException e = assertThrows(BusinessException.class,
+				() -> orderService.create(UUID.randomUUID(), order(item(product.getId(), 1))));
 
 		// Then
-		assertEquals(ResultCode.PRODUCT_OFF_SALE.name(), response.getCode());
+		assertEquals(ResultCode.PRODUCT_OFF_SALE, e.getResultCode());
 		assertEquals(10, productDao.findById(product.getId()).get().getStock());
 	}
 
@@ -139,10 +140,8 @@ public class OrderServiceTest {
 		OrderResponse first = orderService.create(key, order(item(product.getId(), 2)));
 		OrderResponse second = orderService.create(key, order(item(product.getId(), 2)));
 
-		// Then：兩次都成功，而且是同一筆 orderId
-		assertEquals(ResultCode.SUCCESS.name(), first.getCode());
-		assertEquals(ResultCode.SUCCESS.name(), second.getCode());
-		assertEquals(first.getMessage(), second.getMessage()); // 目前 orderId 放在 message 裡
+		// Then：兩次是同一筆 orderId
+		assertEquals(first.getOrderId(), second.getOrderId());
 
 		// Then：庫存只扣一次（100 - 2 = 98，不是 96）
 		assertEquals(98, productDao.findById(product.getId()).get().getStock());
@@ -160,10 +159,13 @@ public class OrderServiceTest {
 
 		// When：同一個 key，第一次買 2 個，第二次改成買 5 個
 		orderService.create(key, order(item(product.getId(), 2)));
-		OrderResponse second = orderService.create(key, order(item(product.getId(), 5)));
+
+		// 檢查有沒有丟出正確exception
+		BusinessException e = assertThrows(BusinessException.class,
+				() -> orderService.create(key, order(item(product.getId(), 5))));
 
 		// Then：第二次回傳 422
-		assertEquals(ResultCode.IDEMPOTENCY_CONFLICT.name(), second.getCode());
+		assertEquals(ResultCode.IDEMPOTENCY_CONFLICT, e.getResultCode());
 
 		// Then：庫存只有扣掉第一次買的 2 個
 		assertEquals(98, productDao.findById(product.getId()).get().getStock());
@@ -208,12 +210,13 @@ public class OrderServiceTest {
 		int successCount = 0;
 
 		for (Future<OrderResponse> f : futures) {
-
-			OrderResponse res = f.get(); // 拿回結果
-
-			if (ResultCode.SUCCESS.name().equals(res.getCode())) {
-				// 成功數量+1
+			try {
+				f.get(); // 拿回結果，沒拋例外就是成功
 				successCount++;
+			} catch (ExecutionException e) {
+				// 沒搶到的人：必須是庫存不足，不能是其他錯誤
+				BusinessException be = assertInstanceOf(BusinessException.class, e.getCause());
+				assertEquals(ResultCode.INSUFFICIENT_STOCK, be.getResultCode());
 			}
 		}
 
@@ -236,13 +239,10 @@ public class OrderServiceTest {
 		Product product = productDao.save(
 				new Product("iPhone 20", new BigDecimal("50000"), 10, ProductStatus.ON_SALE));
 		OrderResponse created = orderService.create(UUID.randomUUID(), order(item(product.getId(), 3)));
-		String orderId = created.getMessage(); // 目前 orderId 放在 message 裡
+		String orderId = created.getOrderId();
 
 		// When：取消訂單
-		OrderResponse response = orderService.cancel("user1", orderId);
-
-		// Then：取消成功
-		assertEquals(ResultCode.ORDER_CANCEL_SUCCESS.name(), response.getCode());
+		orderService.cancel("user1", orderId);
 
 		// Then：庫存加回 10
 		assertEquals(10, productDao.findById(product.getId()).get().getStock());
@@ -266,10 +266,10 @@ public class OrderServiceTest {
 		OrderResponse created = orderService.create(UUID.randomUUID(), order(item(product.getId(), 3)));
 
 		// 取得訂單編號
-		String orderId = created.getMessage();
+		String orderId = created.getOrderId();
 
 		// 第一次取消
-		OrderResponse first = orderService.cancel(userId, orderId);
+		orderService.cancel(userId, orderId);
 
 		// 第一次取消，查詢訂單
 		GetOrderDto orderFirst = orderService.getOrder(userId, orderId);
@@ -277,23 +277,17 @@ public class OrderServiceTest {
 		// 第一次取消，檢查訂單狀態
 		assertEquals(OrderStatus.CANCELLED, orderFirst.getStatus());
 
-		// Then：第一次也回傳成功
-		assertEquals(ResultCode.ORDER_CANCEL_SUCCESS.name(), first.getCode());
-
 		// 檢查第一次取消後，庫存是否正確
 		assertEquals(stock, productDao.findById(product.getId()).get().getStock());
 
-		// 第二次取消
-		OrderResponse second = orderService.cancel(userId, orderId);
+		// 第二次取消：不會拋例外，視為成功
+		orderService.cancel(userId, orderId);
 
 		// 第二次取消，查詢訂單
 		GetOrderDto orderSecond = orderService.getOrder(userId, orderId);
 
 		// 第二次取消，檢查訂單狀態
 		assertEquals(OrderStatus.CANCELLED, orderSecond.getStatus());
-
-		// Then：第二次也回傳成功
-		assertEquals(ResultCode.ORDER_CANCEL_SUCCESS.name(), second.getCode());
 
 		// 檢查第二次取消後，庫存是否正確
 		assertEquals(stock, productDao.findById(product.getId()).get().getStock());
@@ -337,14 +331,12 @@ public class OrderServiceTest {
 
 		startGun.countDown(); // 開放所有執行緒
 
-		// 等待所有任務完成，計算成功人數
+		// 等待所有任務完成，計算成功人數（失敗的話 get() 會拋例外，測試直接失敗）
 		int successCount = 0;
 
 		for (Future<OrderResponse> f : buyers) {
-
-			if (ResultCode.SUCCESS.name().equals(f.get().getCode())) {
-				successCount++;
-			}
+			f.get();
+			successCount++;
 		}
 
 		// 用於確保賣家成功捕貨

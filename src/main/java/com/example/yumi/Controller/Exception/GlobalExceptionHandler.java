@@ -12,6 +12,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import com.example.yumi.Enum.ResultCode;
+import com.example.yumi.Exceptions.BusinessException;
 import com.example.yumi.dto.ErrorResponse;
 
 import lombok.extern.slf4j.Slf4j;
@@ -43,6 +44,12 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(HttpRequestMethodNotSupportedException.class)
 	public ResponseEntity<ErrorResponse> handleMethodNotAllowed(Exception e) {
 		return build(ResultCode.METHOD_NOT_ALLOWED);
+	}
+
+	// 商業邏輯錯誤：直接用例外帶的 ResultCode
+	@ExceptionHandler(BusinessException.class)
+	public ResponseEntity<ErrorResponse> handleBusiness(BusinessException e) {
+		return build(e.getResultCode());
 	}
 
 	// 其他沒預料到的錯誤：記 log，回傳 500
