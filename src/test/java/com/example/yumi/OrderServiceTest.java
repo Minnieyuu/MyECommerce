@@ -357,6 +357,54 @@ public class OrderServiceTest {
 		assertEquals("iPhone 20 新版", after.getName());
 	}
 
+	@Test
+	void 重複下單_相同key同時送出_只建立一張訂單() throws Exception {
+		// Given
+		Product product = productDao.save(
+				new Product("iPhone 20", new BigDecimal("50000"), 100, ProductStatus.ON_SALE));
+		UUID key = UUID.randomUUID();
+
+		int clicks = 5; // 模擬連點 5 次
+		ExecutorService pool = Executors.newFixedThreadPool(clicks);
+		CountDownLatch startGun = new CountDownLatch(1);
+
+		// When：5 個請求，同一個 key、同樣的內容，同時送出
+		List<Future<OrderResponse>> futures = new ArrayList<>();
+		for (int i = 0; i < clicks; i++) {
+			Callable<OrderResponse> task = new Callable<OrderResponse>() {
+				@Override
+				public OrderResponse call() throws Exception {
+					startGun.await();
+					return orderService.create(key, order(item(product.getId(), 2)));
+				}
+			};
+			futures.add(pool.submit(task));
+		}
+
+		startGun.countDown();
+
+		// 每個請求不是成功，就是收到 IDEMPOTENCY_IN_PROGRESS（請用同一個 key 重試）
+		for (Future<OrderResponse> f : futures) {
+			try {
+				f.get();
+			} catch (ExecutionException e) {
+				BusinessException be = assertInstanceOf(BusinessException.class, e.getCause());
+				assertEquals(ResultCode.IDEMPOTENCY_IN_PROGRESS, be.getResultCode());
+			}
+		}
+		pool.shutdown();
+
+		// Then：庫存只扣一次
+		assertEquals(98, productDao.findById(product.getId()).get().getStock());
+
+		// Then：只有一張訂單
+		assertEquals(1, orderDao.count());
+
+		// Then：用同一個 key 重試，拿到的就是那張訂單
+		OrderResponse retry = orderService.create(key, order(item(product.getId(), 2)));
+		assertEquals(orderDao.findAll().get(0).getOrderId(), retry.getOrderId());
+	}
+
 	// 小工具：一個商品項目
 	private ProductInfo item(Long productId, int count) {
 		ProductInfo item = new ProductInfo();

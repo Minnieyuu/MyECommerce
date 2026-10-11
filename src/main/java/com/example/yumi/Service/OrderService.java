@@ -10,6 +10,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 import com.example.yumi.Dao.OrderDao;
@@ -131,9 +132,18 @@ public class OrderService {
 
 		order.setTotalAmount(total);
 
-		// 5. 一起存檔
-		productDao.saveAll(products);
-		orderDao.save(order);
+		// 機率極低，為解決 -> unique key(idempotencyKey)衝突
+		try {
+
+			// 5. 一起存檔
+			productDao.saveAll(products);
+			orderDao.save(order);
+
+		} catch (DataIntegrityViolationException e) {
+
+			throw new BusinessException(ResultCode.IDEMPOTENCY_IN_PROGRESS);
+
+		}
 
 		// 產生訂單編號
 		String date = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE); // 20261006

@@ -8,6 +8,7 @@ public enum ResultCode {
 	PRODUCT_OFF_SALE(400, "商品未上架"),
 	PRODUCT_NOT_FOUND(404, "商品不存在"),
 	ORDER_NOT_FOUND(404, "訂單不存在"),
+	IDEMPOTENCY_IN_PROGRESS(409, "相同 Idempotency-Key 的請求正在處理中，請稍後以相同的 key 重試"),
 	DUPLICATE_PRODUCT(400, "訂單內商品重複"),
 	ORDER_NOT_PAYABLE(409, "訂單狀態無法付款"),
 	PAYMENT_FAILED(402, "付款失敗"),
